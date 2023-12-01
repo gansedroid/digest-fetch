@@ -1,15 +1,15 @@
 /// !-----------------------------------------------------------------------------------------------------------
-/// |  
+/// |
 //  |  `digest-fetch` is a wrapper of `node-fetch` or `fetch` to provide http digest authentication boostraping.
 //  |
 /// !-----------------------------------------------------------------------------------------------------------
 
-import md5 from 'md5';
-import js256 from 'js-sha256';
-const sha256 = js256.sha256;
-import js512 from 'js-sha512';
-const sha512256 = js512.sha512_256;
-import base64 from 'base-64';
+const canRequire = typeof(require) == 'function'
+if (typeof(fetch) !== 'function' && canRequire) var fetch = require('node-fetch')
+const md5 = require('md5')
+const sha256 = require('js-sha256').sha256
+const sha512256 = require('js-sha512').sha512_256
+const base64 = require('base-64')
 
 const supported_algorithms = ['MD5', 'MD5-sess', 'SHA-256', 'SHA-256-sess', 'SHA-512-256', 'SHA-512-256-sess']
 
@@ -21,7 +21,7 @@ const parse = (raw, field, trim=true) => {
   return null
 }
 
-export class DigestClient {
+class DigestClient {
   constructor(user, password, options={}) {
     this.user = user
     this.hashFunc = md5;
@@ -51,19 +51,7 @@ export class DigestClient {
     this.basic = options.basic || false
   }
 
-  async getClient() {
-    if (typeof (fetch) === 'function') {
-      return fetch;
-    }
-    if (this._client == undefined) {
-      const module = await import('node-fetch');
-      this._client = module.default;
-    }
-    return this._client;
-  }
-
   async fetch (url, options={}) {
-    const fetch = await this.getClient();
     if (this.basic) return fetch(url, this.addBasicAuth(options))
     const resp = await fetch(url, this.addAuth(url, options))
     if (resp.status == 401 || (resp.status == this.statusCode && this.statusCode)) {
@@ -117,7 +105,12 @@ export class DigestClient {
     const isRequest = typeof(url) === 'object' && typeof(url.url) === 'string'
     const urlStr = isRequest ? url.url : url
     const _url = urlStr.replace('//', '')
-    const uri = _url.indexOf('/') == -1 ? '/' : _url.slice(_url.indexOf('/'))
+    let uri = _url.indexOf('/') === -1 ? '/' : _url.slice(_url.indexOf('/'));
+
+    if (typeof (options.adoptUri) === 'function') {
+      uri = options.adoptUri(uri);
+    }
+
     const method = options.method ? options.method.toUpperCase() : 'GET'
 
     let ha1 = this.precomputedHash ? this.password : this.computeHash(this.user, this.digest.realm, this.password)
@@ -126,7 +119,7 @@ export class DigestClient {
     }
 
     // optional Hash(entityBody) for 'auth-int'
-    let _ha2 = '' 
+    let _ha2 = ''
     if (this.digest.qop === 'auth-int') {
       // not implemented for auth-int
       if (this.logger) this.logger.warn('Sorry, auth-int is not implemented in this plugin')
@@ -143,7 +136,7 @@ export class DigestClient {
 
     const opaqueString = this.digest.opaque !== null ? `opaque="${this.digest.opaque}",` : ''
     const qopString = this.digest.qop ? `qop=${this.digest.qop},` : ''
-    const digest = `${this.digest.scheme} username="${this.user}",realm="${this.digest.realm}",\
+    const digest = `Digest username="${this.user}",realm="${this.digest.realm}",\
 nonce="${this.digest.nonce}",uri="${uri}",${opaqueString}${qopString}\
 algorithm=${this.digest.algorithm},response="${response}",nc=${ncString},cnonce="${this.digest.cnonce}"`
     options.headers = options.headers || {}
@@ -170,15 +163,13 @@ algorithm=${this.digest.algorithm},response="${response}",nc=${ncString},cnonce=
     }
 
     this.hasAuth = true
-    
-    this.digest.scheme = h.split(/\s/)[0]
 
     this.digest.realm = (parse(h, 'realm', false) || '').replace(/["]/g, '')
 
     this.digest.qop = this.parseQop(h)
 
     this.digest.opaque = parse(h, 'opaque')
-    
+
     this.digest.nonce = parse(h, 'nonce') || ''
 
     this.digest.cnonce = this.makeNonce()
@@ -188,7 +179,7 @@ algorithm=${this.digest.algorithm},response="${response}",nc=${ncString},cnonce=
   parseQop (rawAuth) {
     // Following https://en.wikipedia.org/wiki/Digest_access_authentication
     // to parse valid qop
-    // Samples 
+    // Samples
     // : qop="auth,auth-init",realm=
     // : qop=auth,realm=
     const _qop = parse(rawAuth, 'qop')
@@ -216,4 +207,4 @@ algorithm=${this.digest.algorithm},response="${response}",nc=${ncString},cnonce=
 }
 
 if (typeof(window) === "object") window.DigestFetch = DigestClient
-export default DigestClient
+module.exports = DigestClient
